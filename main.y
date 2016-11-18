@@ -9,7 +9,7 @@ void yyerror(char*);
 
 %%
 program:
-       nq ENDL queries ENDL ns ENDL sentences {printf("Reduce Program\n");}
+       nq ENDL queries ENDL ns ENDL sentences ENDL {printf("Reduce Program\n");}
        ;
 
 nq:
@@ -23,8 +23,8 @@ queries:
        query { printf("Queries -> Query\n"); }
        | queries ENDL query
        ;
-query: atom
-       | '~' atom
+query: constatom
+       | '~' constatom
        ;
 sentences:
 	 sentence
@@ -53,20 +53,23 @@ element:
 atom:
     CONSTANT '(' arglist ')'
     ;
+constatom:
+	CONSTANT '(' constarglist ')'
+        ;
 arglist:
        arg { printf("Arglist -> Arg\n"); }
        | arglist ',' arg
        ;
+constarglist:
+	CONSTANT
+	| constarglist CONSTANT
+	;
 arg:
    CONSTANT { printf("Arg -> Constant\n"); }
    | VARIABLE { printf("Arg -> Variable\n"); }
    ;
 %%
 
-int main(void) {
-    yyparse();
-    return 0;
-}
 
 void yyerror(char *s) {
     printf("Error: %s\n", s);
