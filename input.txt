@@ -1,0 +1,4 @@
+15
+Bad(Bob, Alice)
+1289
+A(x) | (A(x) => ~(B(y) | C(x)))
