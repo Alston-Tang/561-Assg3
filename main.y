@@ -1,72 +1,90 @@
 %{
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <iostream>
+#include "ast.h"
+#include "global.h"
 int yylex(void);
 void yyerror(char*);
 %}
+
+%union {
+    ASTNode *node;
+    ArgList *argList;
+    Arg *arg;
+    int val;
+    char* str;
+}
+
+%type<node> query constatom atom sentence expression term item element
+%type<argList> arglist constarglist
+%type<val> nq ns NUMBER
+%type<str> CONSTANT VARIABLE '(' ')'
+%type<arg> arg
 
 %token NUMBER CONSTANT VARIABLE ENDL
 
 %%
 program:
-       nq ENDL queries ENDL ns ENDL sentences ENDL {printf("Reduce Program\n");}
+       nq ENDL queries ENDL ns ENDL sentences ENDL
        ;
 
 nq:
-       NUMBER { printf("Nq -> Number\n"); }
+       NUMBER { globalNumQueries = $1 }
        ;
 ns:
-       NUMBER
+       NUMBER { globalNumSentences = $1 }
        ;
 
 queries:
-       query { printf("Queries -> Query\n"); }
-       | queries ENDL query
+       query { queries.push_back($1); }
+       | queries ENDL query { queries.push_back($3); }
        ;
-query: constatom
-       | '~' constatom
+query: constatom {$$ = $1;}
+       | '~' constatom {$$ = new ASTNode(); $$->op = NEG; $$->left = $2;}
        ;
 sentences:
-	 sentence
-         | sentences ENDL sentence
+	 sentence { sentences.push_back($1); }
+         | sentences ENDL sentence { sentences.push_back($3); }
          ;
 sentence:
-	expression
+	expression { $$ = $1; }
         ;
 expression:
-	  expression '=' '>' term
-          | term
+	  expression '=' '>' term { $$ = new ASTNode(); $$->op = IPL; $$->left = $1; $$->right = $4; }
+          | term { $$ = $1; }
           ;
 term:
-    term '&' item
-    | term '|' item
-    | item
+    term '&' item { $$ = new ASTNode(); $$->op = AND; $$->left = $1; $$->right = $3; }
+    | term '|' item { $$ = new ASTNode(); $$->op = OR; $$->left = $1; $$->right = $3; }
+    | item { $$ = $1; }
     ;
 item:
-    element
-    | '~' element
+    element { $$ = $1; }
+    | '~' element {$$ = new ASTNode(); $$->op = NEG; $$->left = $2;}
     ;
 element:
-       atom
-       | '(' expression ')'
+       atom { $$ = $1; }
+       | '(' expression ')' { $$ = $2; }
        ;
 atom:
-    CONSTANT '(' arglist ')'
+    CONSTANT '(' arglist ')' { $$ = new ASTNode(); $$->p = new Predicate(std::string($1).substr(0, strlen($1) - strlen($2))); $$->p->argList = $3; }
     ;
 constatom:
-	CONSTANT '(' constarglist ')'
+	CONSTANT '(' constarglist ')' { $$ = new ASTNode(); $$->p = new Predicate(std::string($1).substr(0, strlen($1) - strlen($2))); $$->p->argList = $3; }
         ;
 arglist:
-       arg { printf("Arglist -> Arg\n"); }
-       | arglist ',' arg
+       arg { $$ = new ArgList(); $$->list.push_back($1); }
+       | arglist ',' arg  {$$ = $1; $$->list.push_back($3);}
        ;
 constarglist:
-	CONSTANT
-	| constarglist CONSTANT
+	CONSTANT {$$ = new ArgList(); $$->list.push_back(new Arg(CON, $1));}
+	| constarglist ',' CONSTANT {$$ = $1; $$->list.push_back(new Arg(CON, $3));}
 	;
 arg:
-   CONSTANT { printf("Arg -> Constant\n"); }
-   | VARIABLE { printf("Arg -> Variable\n"); }
+   CONSTANT { $$ = new Arg(CON, $1); }
+   | VARIABLE { $$ = new Arg(VAR, $1); }
    ;
 %%
 
