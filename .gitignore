@@ -1,2 +1,5 @@
 *.c
 /.idea
+lex.yy.cpp
+y.tab.cpp
+y.tab.h
