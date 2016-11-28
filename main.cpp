@@ -7,10 +7,214 @@
 #include <list>
 #include <string>
 #include <ctime>
-#include "ast.h"
 
-int yyparse(void);
-extern FILE* yyin;
+#define NEG 1
+#define IPL 2
+#define AND 3
+#define OR 4
+
+#define VAR 11
+#define CON 12
+
+#define LB 21
+
+
+namespace AST {
+    struct Arg{
+        int type;
+        std::string name;
+        Arg(int type, char* name);
+        Arg(int type, std::string &name);
+    };
+
+    struct ArgList{
+        std::vector<Arg*> list;
+    };
+
+    struct Predicate{
+        std::string name;
+        ArgList *argList;
+        Predicate(std::string name);
+    };
+
+    struct ASTNode{
+        int op;
+        ASTNode *left, *right;
+        Predicate *p;
+        ASTNode();
+        ASTNode* deepCopy();
+    };
+    Arg::Arg(int type, char *name) {
+        this->type = type;
+        this->name = std::string(name);
+    }
+    Arg::Arg(int type, std::string &name) {
+        this->type = type;
+        this->name = name;
+    }
+
+    ASTNode::ASTNode() {
+        op = 0;
+        p = nullptr;
+        left = nullptr;
+        right = nullptr;
+    }
+
+    ASTNode* ASTNode::deepCopy() {
+        ASTNode *rv = new ASTNode();
+        *rv = *this;
+        if (rv->left) rv->left = rv->left->deepCopy();
+        if (rv->right) rv->right = rv->right->deepCopy();
+        return rv;
+    }
+
+    Predicate::Predicate(std::string name) {
+        this->name = name;
+        this->argList = new ArgList();
+    }
+}
+std::string getConstant(std::string &s, int &cur) {
+    std::string rv;
+    while (cur < s.size() && (s[cur] < 'A' || s[cur] > 'Z')) cur++;
+    rv += s[cur++];
+    while (cur < s.size() && ((s[cur] <= 'z' && s[cur] >= 'a') || (s[cur] <= 'Z' && s[cur] >= 'A'))) {
+        rv += s[cur++];
+    }
+    return rv;
+}
+
+std::string getConstantVariable(std::string &s, int &cur, int &type) {
+    std::string rv;
+    while (cur < s.size() && (s[cur] < 'A' || s[cur] > 'z' || (s[cur] < 'a' && s[cur] > 'Z'))) cur++;
+    if (s[cur] < 'a') type = CON;
+    else type = VAR;
+    rv += s[cur++];
+    while (cur < s.size() && ((s[cur] <= 'z' && s[cur] >= 'a') || (s[cur] <= 'Z' && s[cur] >= 'A'))) {
+        rv += s[cur++];
+    }
+    return rv;
+}
+
+bool getChar(char c, std::string &s, int &cur) {
+    while (cur < s.size() && s[cur] != c) cur++;
+    if (s[cur] == c) {
+        cur++;
+        return true;
+    }
+    return false;
+}
+
+bool check(char c, char t, std::string &s, int cur) {
+    while (cur < s.size()) {
+        if (s[cur] == c) return true;
+        if (s[cur] == t) return false;
+        cur++;
+    }
+    return false;
+}
+
+AST::Predicate* parsePredicate(std::string &s, int &cur) {
+    AST::Predicate *p = new AST::Predicate(getConstant(s, cur));
+    getChar('(', s, cur);
+    int type;
+    std::string argName = getConstantVariable(s, cur, type);
+    p->argList->list.push_back(new AST::Arg(type, argName));
+    while (check(',', ')', s, cur)) {
+        getChar(',', s, cur);
+        argName = getConstantVariable(s, cur, type);
+        p->argList->list.push_back(new AST::Arg(type, argName));
+    }
+    getChar(')', s, cur);
+    return p;
+}
+
+AST::ASTNode* parseQuery(std::string &s) {
+    AST::ASTNode *root = new AST::ASTNode();
+    AST::ASTNode *curNode = root;
+    bool pos = true;
+    int cur = 0;
+    if (s[cur] == '~') {
+        cur++;
+        pos = false;
+        curNode->op = NEG;
+        curNode->left = new AST::ASTNode();
+        curNode = curNode->left;
+    }
+    AST::Predicate *p = parsePredicate(s, cur);
+    curNode->p = p;
+    return root;
+}
+
+int checkType(std::string &s, int cur) {
+    while (cur < s.size()) {
+        if (s[cur] <= 'Z' && s[cur] >= 'A') return CON;
+        if (s[cur] == '|') return OR;
+        if (s[cur] == '&') return AND;
+        if (s[cur] == '=') return IPL;
+        if (s[cur] == '(') return LB;
+        if (s[cur] == '~') return NEG;
+        cur++;
+    }
+    return 0;
+}
+
+AST::ASTNode* parseNode(std::string &s, int &cur) {
+    AST::ASTNode *rv = new AST::ASTNode;
+    int type = checkType(s, cur);
+    if (type == CON) {
+        rv->p = parsePredicate(s, cur);
+    }
+    if (type == LB) {
+        getChar('(', s, cur);
+        int inType = checkType(s, cur);
+        if (inType == NEG) {
+            getChar('~', s, cur);
+            rv->op = NEG;
+            rv->left = parseNode(s, cur);
+        }
+        else {
+            rv->left = parseNode(s, cur);
+            int opType = checkType(s, cur);
+            if (opType == OR) {
+                rv->op = OR;
+                getChar('|', s, cur);
+            }
+            else if (opType == AND) {
+                rv->op = AND;
+                getChar('&', s, cur);
+            }
+            else if (opType == IPL) {
+                rv->op = IPL;
+                getChar('=', s, cur);
+                getChar('>', s, cur);
+            }
+            rv->right = parseNode(s, cur);
+        }
+        getChar(')', s, cur);
+    }
+    return rv;
+}
+AST::ASTNode* parseSentence(std::string &s) {
+    int cur = 0;
+    return parseNode(s, cur);
+}
+
+void parse(int &numQueries, int &numSentences, std::vector<AST::ASTNode*> &queries, std::vector<AST::ASTNode*> &sentences) {
+    std::ifstream in("input.txt");
+    in >> numQueries;
+    std::string str;
+    getline(in, str);
+    for (int i = 0; i < numQueries; i++) {
+        getline(in, str);
+        queries.push_back(parseQuery(str));
+    }
+    in >> numSentences;
+    getline(in, str);
+    for (int i = 0; i < numSentences; i++) {
+        getline(in, str);
+        sentences.push_back(parseSentence(str));
+    }
+}
 
 
 namespace KB {
@@ -226,7 +430,7 @@ namespace KB {
             cur->next->prev = lnk;
             cur->next = lnk;
         }
-        void insertPredicate(Predicate *p, ArgList *argList) {
+        void insertPredicate(Predicate *p, AST::ArgList *argList) {
 
             PredicateLink *cur = this->head;
             for (; cur->next != tail && cur->next->con->p->name < p->name; cur = cur->next);
@@ -451,15 +655,15 @@ namespace KB {
     };
 }
 
-ASTNode *globalASTRoot = nullptr;
+AST::ASTNode *globalASTRoot = nullptr;
 int globalNumQueries;
 int globalNumSentences;
-std::vector<ASTNode*> queries;
-std::vector<ASTNode*> sentences;
+std::vector<AST::ASTNode*> queries;
+std::vector<AST::ASTNode*> sentences;
 
-void eliminateImply(ASTNode *node) {
+void eliminateImply(AST::ASTNode *node) {
     if (node->op == IPL) {
-        ASTNode *newNode = new ASTNode();
+        AST::ASTNode *newNode = new AST::ASTNode();
         newNode->op = NEG;
         newNode->left = node->left;
 
@@ -470,25 +674,25 @@ void eliminateImply(ASTNode *node) {
     if (node->right) eliminateImply(node->right);
 }
 
-void propagateNeg(ASTNode *node) {
+void propagateNeg(AST::ASTNode *node) {
     if (node->op == NEG) {
         if (node->left->op) {
-            ASTNode *del = node->left;
+            AST::ASTNode *del = node->left;
             *node = *del;
             delete del;
 
             switch (node->op) {
-                ASTNode *negR, *negL;
+                AST::ASTNode *negR, *negL;
                 case NEG:
                     del = node->left;
                     *node = *del;
                     delete del;
                     break;
                 case AND:
-                    negL = new ASTNode();
+                    negL = new AST::ASTNode();
                     negL->op = NEG;
                     negL->left = node->left;
-                    negR = new ASTNode();
+                    negR = new AST::ASTNode();
                     negR->op = NEG;
                     negR->left = node->right;
 
@@ -497,10 +701,10 @@ void propagateNeg(ASTNode *node) {
                     node->right = negR;
                     break;
                 case OR:
-                    negL = new ASTNode();
+                    negL = new AST::ASTNode();
                     negL->op = NEG;
                     negL->left = node->left;
-                    negR = new ASTNode();
+                    negR = new AST::ASTNode();
                     negR->op = NEG;
                     negR->left = node->right;
 
@@ -518,7 +722,7 @@ void propagateNeg(ASTNode *node) {
     if (node->right) propagateNeg(node->right);
 }
 
-bool distributeOr(ASTNode *node) {
+bool distributeOr(AST::ASTNode *node) {
     bool changed = false;
     if (node->op == OR) {
         if (node->left->op == AND || node->right->op == AND) {
@@ -526,9 +730,9 @@ bool distributeOr(ASTNode *node) {
             node->op = AND;
             if (node->left->op == AND) {
                 node->left->op = OR;
-                ASTNode *distRight = node->left->right;
+                AST::ASTNode *distRight = node->left->right;
                 node->left->right = node->right->deepCopy();
-                ASTNode *nOr = new ASTNode();
+                AST::ASTNode *nOr = new AST::ASTNode();
                 nOr->left = distRight;
                 nOr->right = node->right;
                 nOr->op = OR;
@@ -536,9 +740,9 @@ bool distributeOr(ASTNode *node) {
             }
             else if(node->right->op == AND) {
                 node->right->op = OR;
-                ASTNode *distLeft = node->right->left;
+                AST::ASTNode *distLeft = node->right->left;
                 node->right->left = node->left->deepCopy();
-                ASTNode *nOr = new ASTNode();
+                AST::ASTNode *nOr = new AST::ASTNode();
                 nOr->left = node->left;
                 nOr->right = distLeft;
                 nOr->op = OR;
@@ -552,15 +756,15 @@ bool distributeOr(ASTNode *node) {
 }
 
 void convertToCnf() {
-    for (ASTNode *root : sentences) {
+    for (AST::ASTNode *root : sentences) {
         eliminateImply(root);
         propagateNeg(root);
         while (distributeOr(root));
     }
 }
 
-KB::Sentence* generateSentence(ASTNode *node, KB::Sentence *s, KB::KB &kb) {
-    ASTNode *cur = node;
+KB::Sentence* generateSentence(AST::ASTNode *node, KB::Sentence *s, KB::KB &kb) {
+    AST::ASTNode *cur = node;
     bool pos = true;
     if (!node->op || node->op == NEG) {
         if (node->op == NEG) {
@@ -581,7 +785,7 @@ KB::Sentence* generateSentence(ASTNode *node, KB::Sentence *s, KB::KB &kb) {
     return s;
 }
 
-void splitCNF(ASTNode *node, KB::KB &kb) {
+void splitCNF(AST::ASTNode *node, KB::KB &kb) {
     KB::Sentence *s;
     if (node->op == AND) {
         splitCNF(node->left, kb);
@@ -593,14 +797,14 @@ void splitCNF(ASTNode *node, KB::KB &kb) {
 }
 
 void insertToKB(KB::KB &kb) {
-    for (ASTNode *root :sentences) {
+    for (AST::ASTNode *root :sentences) {
         splitCNF(root, kb);
     }
 }
 
 void convertQuery(std::vector<KB::Sentence*> &qs, KB::KB &kb) {
-    for (ASTNode *root : queries) {
-        ASTNode *cur = root;
+    for (AST::ASTNode *root : queries) {
+        AST::ASTNode *cur = root;
         bool pos = true;
         if (cur->op == NEG) {
             cur = cur->left;
@@ -615,8 +819,7 @@ void convertQuery(std::vector<KB::Sentence*> &qs, KB::KB &kb) {
 
 
 int main() {
-    yyin = fopen("input.txt", "r");
-    yyparse();
+    parse(globalNumQueries, globalNumSentences, queries, sentences);
     // Convert To CNF Form
     convertToCnf();
     // Insert To KB
